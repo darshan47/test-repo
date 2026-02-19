@@ -20,10 +20,11 @@ Endpoints
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from botocore.exceptions import ClientError
 
-from app.apis.dependencies import get_current_user
+from app.dependencies.api import get_current_user
 from app.dao.base import VPCRepository
-from app.dao.dependencies import get_vpc_repository
+from app.dependencies.dao import get_vpc_repository
 from app.schemas.vpc import CreateVPCRequest, VPCListResponse, VPCResponse
 from app.services.vpc import fetch_all_vpcs, fetch_vpc, provision_vpc, remove_vpc_record
 
@@ -101,10 +102,9 @@ def get_vpc(
 @router.delete(
     "/{vpc_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a VPC record",
+    summary="Delete a VPC and its AWS resources",
     description=(
-        "Removes the stored record for the given VPC id. "
-        "This does NOT delete the actual VPC from AWS."
+        "Deletes the AWS VPC resources (subnets, IGW, VPC) and then removes the stored record."
     ),
 )
 def delete_vpc(
@@ -112,11 +112,27 @@ def delete_vpc(
     current_user: str = Depends(get_current_user),
     repo: VPCRepository = Depends(get_vpc_repository),
 ) -> None:
-    """Delete the stored record for a VPC (does not touch the real AWS VPC)."""
+    """Delete AWS VPC resources and remove the stored record."""
     logger.info("DELETE /vpc/%s called by '%s'", vpc_id, current_user)
-    deleted = remove_vpc_record(vpc_id=vpc_id, repo=repo)
-    if not deleted:
+    try:
+        deleted = remove_vpc_record(vpc_id=vpc_id, repo=repo)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"VPC '{vpc_id}' not found.",
+            )
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code")
+        if code == "DependencyViolation":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "VPC has dependent resources not created by this service. "
+                    "Only resources created by this service are deleted; clean up the "
+                    "remaining dependencies manually, then retry."
+                ),
+            ) from exc
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"VPC '{vpc_id}' not found.",
-        )
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AWS error: {exc}",
+        ) from exc

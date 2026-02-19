@@ -17,7 +17,7 @@ from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from app.config import settings
+from app import config
 
 # bcrypt context for hashing passwords in the demo store
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -28,10 +28,10 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
     """Create a signed JWT whose 'sub' claim is *subject* (typically username)."""
     expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=settings.jwt_expire_minutes)
+        expires_delta or timedelta(minutes=config.JWT_EXPIRE_MINUTES)
     )
     payload = {"sub": subject, "exp": expire}
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, config.JWT_SECRET_KEY, algorithm=config.JWT_ALGORITHM)
 
 
 def decode_access_token(token: str) -> Optional[str]:
@@ -41,7 +41,7 @@ def decode_access_token(token: str) -> Optional[str]:
     """
     try:
         payload = jwt.decode(
-            token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
+            token, config.JWT_SECRET_KEY, algorithms=[config.JWT_ALGORITHM]
         )
         return payload.get("sub")
     except JWTError:
@@ -57,7 +57,7 @@ def authenticate_user(username: str, password: str) -> bool:
     The demo store uses plain-text passwords for simplicity; swap this for
     a real user store (e.g. Cognito, RDS) in production.
     """
-    users = settings.get_demo_users()
+    users = config.get_demo_users()
     stored_password = users.get(username)
     if not stored_password:
         return False

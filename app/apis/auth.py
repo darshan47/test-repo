@@ -13,7 +13,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
 from app.services.auth import authenticate_user, create_access_token
-from app.config import settings
+from app import config
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -45,5 +45,5 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenResponse:
     token = create_access_token(subject=form_data.username)
     return TokenResponse(
         access_token=token,
-        expires_in=settings.jwt_expire_minutes * 60,
+        expires_in=config.JWT_EXPIRE_MINUTES * 60,
     )

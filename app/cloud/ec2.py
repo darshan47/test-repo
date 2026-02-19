@@ -19,17 +19,17 @@ from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from app.config import settings
+from app import config
 
 logger = logging.getLogger(__name__)
 
 
 def _ec2_client():
     """Build a boto3 EC2 client from application settings."""
-    kwargs = {"region_name": settings.aws_region}
-    if settings.aws_access_key_id:
-        kwargs["aws_access_key_id"] = settings.aws_access_key_id
-        kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+    kwargs = {"region_name": config.AWS_REGION}
+    if config.AWS_ACCESS_KEY_ID:
+        kwargs["aws_access_key_id"] = config.AWS_ACCESS_KEY_ID
+        kwargs["aws_secret_access_key"] = config.AWS_SECRET_ACCESS_KEY
     return boto3.client("ec2", **kwargs)
 
 
@@ -135,7 +135,7 @@ def create_vpc_with_subnets(
         "vpc_name": vpc_name,
         "vpc_cidr": vpc_cidr,
         "igw_id": igw_id,
-        "region": settings.aws_region,
+        "region": config.AWS_REGION,
         "subnets": created_subnets,
         "tags": extra_tags,
         "created_by": created_by,
@@ -166,6 +166,90 @@ def _cleanup_on_error(ec2, vpc_id: str, igw_id: str, subnet_ids: list[str]) -> N
         logger.info("Deleted VPC %s", vpc_id)
     except ClientError as exc:
         logger.error("Could not delete VPC %s: %s", vpc_id, exc)
+
+
+def delete_vpc_resources(
+    vpc_id: str,
+    subnet_ids: Optional[list[str]] = None,
+    igw_id: Optional[str] = None,
+) -> None:
+    """
+    Delete a VPC and its dependent resources (subnets + Internet Gateway).
+
+    This is a destructive operation. It attempts to delete all subnets, detach
+    and delete any Internet Gateway, and finally delete the VPC itself.
+    """
+    ec2 = _ec2_client()
+
+    # ── 1. Delete subnets (only those created by us) ──────────────────────────
+    for subnet_id in subnet_ids or []:
+        try:
+            ec2.delete_subnet(SubnetId=subnet_id)
+            logger.info("Deleted subnet %s", subnet_id)
+        except ClientError as exc:
+            logger.error("Could not delete subnet %s: %s", subnet_id, exc)
+            raise
+
+    # ── 2. Delete IGW (only the one we created) ───────────────────────────────
+    if igw_id:
+        try:
+            ec2.detach_internet_gateway(InternetGatewayId=igw_id, VpcId=vpc_id)
+            ec2.delete_internet_gateway(InternetGatewayId=igw_id)
+            logger.info("Deleted IGW %s", igw_id)
+        except ClientError as exc:
+            logger.error("Could not delete IGW %s: %s", igw_id, exc)
+            raise
+
+    # ── 3. Delete VPC ─────────────────────────────────────────────────────────
+    try:
+        ec2.delete_vpc(VpcId=vpc_id)
+        logger.info("Deleted VPC %s", vpc_id)
+    except ClientError as exc:
+        # Log possible remaining dependencies to aid cleanup
+        try:
+            eni_resp = ec2.describe_network_interfaces(
+                Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+            )
+            enis = [eni["NetworkInterfaceId"] for eni in eni_resp.get("NetworkInterfaces", [])]
+            if enis:
+                logger.error("Remaining ENIs for VPC %s: %s", vpc_id, ", ".join(enis))
+        except ClientError:
+            logger.exception("Failed to describe ENIs for VPC %s", vpc_id)
+
+        try:
+            rt_resp = ec2.describe_route_tables(
+                Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+            )
+            non_main_rts = []
+            for rt in rt_resp.get("RouteTables", []):
+                is_main = any(assoc.get("Main") for assoc in rt.get("Associations", []))
+                if not is_main:
+                    non_main_rts.append(rt["RouteTableId"])
+            if non_main_rts:
+                logger.error(
+                    "Remaining non-main route tables for VPC %s: %s",
+                    vpc_id,
+                    ", ".join(non_main_rts),
+                )
+        except ClientError:
+            logger.exception("Failed to describe route tables for VPC %s", vpc_id)
+
+        try:
+            ep_resp = ec2.describe_vpc_endpoints(
+                Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+            )
+            endpoints = [ep["VpcEndpointId"] for ep in ep_resp.get("VpcEndpoints", [])]
+            if endpoints:
+                logger.error(
+                    "Remaining VPC endpoints for VPC %s: %s",
+                    vpc_id,
+                    ", ".join(endpoints),
+                )
+        except ClientError:
+            logger.exception("Failed to describe VPC endpoints for VPC %s", vpc_id)
+
+        logger.error("Could not delete VPC %s: %s", vpc_id, exc)
+        raise
 
 
 def get_vpc_details(vpc_id: str) -> dict:
@@ -206,6 +290,6 @@ def get_vpc_details(vpc_id: str) -> dict:
         "vpc_name": name_tag,
         "vpc_cidr": vpc["CidrBlock"],
         "state": vpc["State"],
-        "region": settings.aws_region,
+        "region": config.AWS_REGION,
         "subnets": subnets,
     }

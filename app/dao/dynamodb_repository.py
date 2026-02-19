@@ -20,7 +20,7 @@ from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from app.config import settings
+from app import config
 from app.dao.base import VPCRepository
 
 logger = logging.getLogger(__name__)
@@ -42,13 +42,13 @@ class DynamoDBVPCRepository(VPCRepository):
 
     def _build_resource(self):
         """Create a boto3 DynamoDB resource from application settings."""
-        kwargs: dict = {"region_name": settings.aws_region}
-        if settings.aws_access_key_id:
-            kwargs["aws_access_key_id"] = settings.aws_access_key_id
-            kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
-        if settings.dynamodb_endpoint_url:
+        kwargs: dict = {"region_name": config.AWS_REGION}
+        if config.AWS_ACCESS_KEY_ID:
+            kwargs["aws_access_key_id"] = config.AWS_ACCESS_KEY_ID
+            kwargs["aws_secret_access_key"] = config.AWS_SECRET_ACCESS_KEY
+        if config.DYNAMODB_ENDPOINT_URL:
             # Enables local DynamoDB (e.g. `dynamodb-local` container)
-            kwargs["endpoint_url"] = settings.dynamodb_endpoint_url
+            kwargs["endpoint_url"] = config.DYNAMODB_ENDPOINT_URL
         return boto3.resource("dynamodb", **kwargs)
 
     def _get_table(self):
@@ -60,7 +60,7 @@ class DynamoDBVPCRepository(VPCRepository):
             return self._table
 
         ddb = self._build_resource()
-        table_name = settings.dynamodb_table_name
+        table_name = config.DYNAMODB_TABLE_NAME
 
         try:
             table = ddb.create_table(

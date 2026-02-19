@@ -9,7 +9,7 @@ backend is in use — DynamoDB, in-memory, or any future alternative.
 import logging
 from typing import Optional
 
-from app.cloud.ec2 import create_vpc_with_subnets
+from app.cloud.ec2 import create_vpc_with_subnets, delete_vpc_resources
 from app.dao.base import VPCRepository
 from app.schemas.vpc import CreateVPCRequest, VPCResponse
 
@@ -81,8 +81,17 @@ def fetch_all_vpcs(repo: VPCRepository) -> list[VPCResponse]:
 
 def remove_vpc_record(vpc_id: str, repo: VPCRepository) -> bool:
     """
-    Delete a VPC record via the DAO (does NOT touch the real AWS VPC).
+    Delete the AWS VPC resources and remove the record from the DAO.
 
     Returns ``True`` if the record existed and was deleted.
     """
+    record = repo.get(vpc_id)
+    if record is None:
+        return False
+
+    delete_vpc_resources(
+        vpc_id=vpc_id,
+        subnet_ids=[s["subnet_id"] for s in record.get("subnets", [])],
+        igw_id=record.get("igw_id"),
+    )
     return repo.delete(vpc_id)
