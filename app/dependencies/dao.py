@@ -11,7 +11,7 @@ dependency — no service or route code changes are needed:
 """
 
 from app.dao.base import VPCRepository
-from app.dao.dynamodb_repository import DynamoDBVPCRepository
+from app.dao.dynamodb import DynamoDBVPCRepository
 
 # A single, module-level instance is sufficient — DynamoDBVPCRepository is
 # stateless apart from the cached table handle, which is thread-safe.
