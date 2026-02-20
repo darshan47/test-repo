@@ -1,22 +1,3 @@
-"""
-VPC router — all endpoints under /vpc.
-
-Every route requires a valid JWT (via the `get_current_user` dependency).
-Authorization is open to all authenticated users — no additional role
-checks are applied.
-
-The VPCRepository is injected via `get_vpc_repository`.  Swapping the
-storage backend (e.g. an in-memory repo for tests) only requires overriding
-that single dependency — no route or service code changes are needed.
-
-Endpoints
-─────────
-  POST   /vpc            Create a new VPC with subnets
-  GET    /vpc            List all stored VPC records
-  GET    /vpc/{vpc_id}   Get a single VPC record by id
-  DELETE /vpc/{vpc_id}   Remove a VPC record from the store (not from AWS)
-"""
-
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -31,7 +12,6 @@ from app.services.vpc import fetch_all_vpcs, fetch_vpc, provision_vpc, remove_vp
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vpc", tags=["VPC Management"])
-
 
 @router.post(
     "",
